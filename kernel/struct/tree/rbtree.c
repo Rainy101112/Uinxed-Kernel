@@ -1,14 +1,10 @@
-#include "stdlib.h"
-
-typedef struct rb_node {
-        int key, color; // 0:red 1:black
-        struct rb_node *lchild, *rchild;
-} rb_node;
+#include "alloc.h"
+#include "rbtree.h"
 
 rb_node __NIL;
 #define NIL (&__NIL)
 
-__attribute__((constructor)) void init_NIL()
+__attribute__((constructor)) void rbtree_init_NIL()
 {
     NIL->key    = 0;
     NIL->color  = 1;
@@ -16,7 +12,7 @@ __attribute__((constructor)) void init_NIL()
     return;
 }
 
-rb_node *get_new_rb_node(int val)
+rb_node *rbtree_new_node(int val)
 {
     rb_node *p = (rb_node *)malloc(sizeof(rb_node));
     p->key     = val;
@@ -25,7 +21,7 @@ rb_node *get_new_rb_node(int val)
     return p;
 }
 
-rb_node *left_rotate(rb_node *root)
+rb_node *rbtree_left_rotate(rb_node *root)
 {
     rb_node *temp = root->rchild;
     root->rchild  = temp->lchild;
@@ -33,7 +29,7 @@ rb_node *left_rotate(rb_node *root)
     return temp;
 }
 
-rb_node *right_rotate(rb_node *root)
+rb_node *rbtree_right_rotate(rb_node *root)
 {
     rb_node *temp = root->lchild;
     root->lchild  = temp->rchild;
@@ -41,7 +37,11 @@ rb_node *right_rotate(rb_node *root)
     return temp;
 }
 
-rb_node *insert_maintain(rb_node *root)
+static int has_red_child(rb_node *node) {
+    return (node->lchild->color == 0) || (node->rchild->color == 0);
+}
+
+static rb_node *insert_maintain(rb_node *root)
 {
     if (!has_red_child(root)) return root;
     int flag = 0;
@@ -50,11 +50,11 @@ rb_node *insert_maintain(rb_node *root)
     if (root->rchild->color == 0 && has_red_child(root->rchild)) flag = 2;
     if (flag == 0) return root;
     if (flag == 1) {
-        if (root->lchild->rchild->color == 0) { root->lchild = left_rotate(root->lchild); }
-        root = right_rotate(root);
+        if (root->lchild->rchild->color == 0) { root->lchild = rbtree_left_rotate(root->lchild); }
+        root = rbtree_right_rotate(root);
     } else {
-        if (root->rchild->lchild == 0) { root->rchild = right_rotate(root->rchild); }
-        root = left_rotate(root);
+        if (root->rchild->lchild == 0) { root->rchild = rbtree_right_rotate(root->rchild); }
+        root = rbtree_left_rotate(root);
     }
 insert_end:
     root->color         = 0;
@@ -62,9 +62,9 @@ insert_end:
     return root;
 }
 
-rb_node *__insert(rb_node *root, int val)
+static rb_node *__insert(rb_node *root, int val)
 {
-    if (root == NIL) return get_new_rb_node(val);
+    if (root == NIL) return rbtree_new_node(val);
     if (root->key == val) return root;
     if (val < root->key)
         root->lchild = __insert(root->lchild, val);
@@ -73,31 +73,31 @@ rb_node *__insert(rb_node *root, int val)
     return insert_maintain(root);
 }
 
-rb_node *insert(rb_node *root, int val)
+rb_node *rbtree_insert(rb_node *root, int val)
 {
     root        = __insert(root, val);
     root->color = 1;
     return root;
 }
 
-rb_node *predecessor(rb_node *root)
+static rb_node *predecessor(rb_node *root)
 {
     rb_node *temp = root->lchild;
     while (temp->rchild != NIL) temp = temp->rchild;
     return temp;
 }
 
-rb_node *erase_maintain(rb_node *root)
+static rb_node *erase_maintain(rb_node *root)
 {
     if (root->lchild->color != 2 && root->rchild->color != 2) return root;
     if (has_red_child(root)) {
         int flag    = 0;
         root->color = 0;
         if (root->lchild->color == 0) {
-            root = right_rotate(root);
+            root = rbtree_right_rotate(root);
             flag = 1;
         } else {
-            root = left_rotate(root);
+            root = rbtree_left_rotate(root);
             flag = 2;
         }
         root->color = 1;
@@ -117,25 +117,25 @@ rb_node *erase_maintain(rb_node *root)
     if (root->lchild->color == 2) {
         if (root->rchild->rchild->color != 0) {
             root->rchild->color = 0;
-            root->rchild        = right_rotate(root->rchild);
+            root->rchild        = rbtree_right_rotate(root->rchild);
             root->rchild->color = 1;
         }
-        root        = left_rotate(root);
+        root        = rbtree_left_rotate(root);
         root->color = root->lchild->color;
     } else {
         if (root->lchild->lchild->color != 0) {
             root->lchild->color = 0;
-            root->lchild        = left_rotate(root->lchild);
+            root->lchild        = rbtree_left_rotate(root->lchild);
             root->lchild->color = 1;
         }
-        root        = right_rotate(root);
+        root        = rbtree_right_rotate(root);
         root->color = root->rchild->color;
     }
     root->lchild->color = root->rchild->color = 1;
     return root;
 }
 
-rb_node *__erase(rb_node *root, int val)
+static rb_node *__erase(rb_node *root, int val)
 {
     if (root == NIL) return NIL;
     if (val < root->key) {
@@ -157,9 +157,17 @@ rb_node *__erase(rb_node *root, int val)
     return erase_maintain(root);
 }
 
-rb_node *erase(rb_node *root, int val)
+rb_node *rbtree_erase(rb_node *root, int val)
 {
     root        = __erase(root, val);
     root->color = 1;
     return root;
+}
+
+void rbtree_clear(rb_node *root) {
+    if (root == NIL) return;
+    rbtree_clear(root->lchild);
+    rbtree_clear(root->rchild);
+    free(root);
+    return;
 }

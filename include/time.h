@@ -3,9 +3,11 @@
 
 typedef long time_t;
 
-typedef struct timespec {
+struct timespec {
         time_t second;
         long nanosecond;
-} timespec;
+};
+
+typedef struct timespec timespec_t;
 
 #endif // INCLUDE_TIME_H_

@@ -34,4 +34,7 @@ typedef typeof(nullptr) nullptr_t;
 #    define __STDC_VERSION_STDDEF_H__ 202311L
 #endif
 
+typedef unsigned int uid_t;
+typedef unsigned int gid_t;
+
 #endif // INCLUDE_STDDEF_H_

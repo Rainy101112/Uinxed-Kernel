@@ -1,17 +1,31 @@
 #ifndef INCLUDE_FS_H_
 #define INCLUDE_FS_H_
 
+#include "stddef.h"
 #include "stdint.h"
+#include "fs/superblock.h"
+#include "intrusive_list.h"
+#include "fs/file.h"
 
 #define FILENAME_MAX_LENGTH 255
 
-typedef uint32_t uid_t;
-typedef uint32_t gid_t;
+struct filesystem;
+struct vfsmount;
 
-typedef struct filesystem {
+typedef struct dentry dentry;
+
+struct vfsmount {
+        dentry *mnt_root;
+        sb_t *mnt_sb;
+        int mnt_flags;
+        struct vfsmount *mnt_parent;
+        ilist_node_t mnt_mounts;
+};
+
+struct filesystem {
         const char *name;
         int fs_flags;
-} filesystem_t;
+};
 
 int vfs_register(sb_t *);
 int vfs_unregister(sb_t *);
