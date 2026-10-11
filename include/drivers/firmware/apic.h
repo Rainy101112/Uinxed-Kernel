@@ -114,9 +114,18 @@ typedef struct {
         uint8_t       lint;
 } __attribute__((packed)) madt_io_apic_nmi_t;
 
+/* I/O APIC redirection-entry flags (Intel SDM Vol.3, 10.12.4) */
+#define IOAPIC_POLARITY_ACTIVE_LOW (1U << 13)
+#define IOAPIC_TRIGGER_LEVEL       (1U << 15)
+#define IOAPIC_MASKED              (1U << 16)
+
+/* Number of MADT interrupt source overrides remembered for later lookup */
+#define MADT_MAX_IRQ_OVERRIDES 16
+
 typedef struct {
         uint8_t  vector;
         uint32_t irq;
+        uint16_t flags; /* IOAPIC_* flags; 0 = active-high, edge-triggered, unmasked */
 } ioapic_routing_t;
 
 /* Turn off PIC */
@@ -127,6 +136,13 @@ void ioapic_write(uint32_t reg, uint32_t value);
 
 /* Read I/O APIC registers */
 uint32_t ioapic_read(uint32_t reg);
+
+/* Whether an I/O APIC was discovered and initialized */
+int ioapic_available(void);
+
+/* Look up a MADT interrupt source override by ISA IRQ or GSI. Returns 1 and
+ * fills gsi/flags (raw ACPI MPS INTI flags) when an override matches, else 0. */
+int madt_irq_override(uint8_t irq, uint32_t *gsi, uint16_t *flags);
 
 /* Configuring I/O APIC interrupt routing */
 void ioapic_add(ioapic_routing_t *routing);

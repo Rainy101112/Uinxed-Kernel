@@ -1150,6 +1150,8 @@ __attribute__((noreturn)) static void idle_thread(void *arg)
         enable_intr();
         __asm__ volatile("hlt");
         disable_intr();
+        /* Fallback for systems where the SCI is not (or cannot be) routed: the power button only sets PM1 status. */
+        acpi_event_poll();
         sched_yield();
     }
 }
@@ -1535,6 +1537,7 @@ __attribute__((noreturn)) void sched_start(void)
         enable_intr();
         __asm__ volatile("hlt");
         disable_intr();
+        acpi_event_poll();
         sched_yield();
     }
 }

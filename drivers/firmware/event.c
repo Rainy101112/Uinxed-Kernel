@@ -264,19 +264,59 @@ int acpi_sci_init(void)
     /* Enable SCI-related fixed events. The power-button enable is set; callers can add more. */
     acpi_pm1_enable_set(ACPI_PM1_EN_PWRBTN);
 
-    /* Map ISA IRQ (FADT->sci_int) to the APIC vector. Standard PC/AT routing: IRQ n -> vector (0x20 + n). */
-    uint8_t irq = f->sci_int;
+    /*
+     * Resolve the SCI GSI and its polarity/trigger mode. The FADT SCI_INT is
+     * normally a GSI already, but honor a MADT interrupt source override when
+     * one exists so the firmware's level/polarity choice is respected (real
+     * hardware uses active-low level, but e.g. QEMU reports active-high level).
+     */
+    uint8_t  irq         = f->sci_int;
     if (irq == 0) irq = 9;
-    sci_vector = IRQ_0 + irq;
+    uint32_t gsi         = irq;
+    uint16_t acpi_flags  = 0;
+    uint16_t ioapic_attr = IOAPIC_POLARITY_ACTIVE_LOW | IOAPIC_TRIGGER_LEVEL; // ACPI default for the SCI
+
+    if (madt_irq_override(irq, &gsi, &acpi_flags)) {
+        uint8_t polarity = acpi_flags & 0x3;        // 01 = active high, 11 = active low
+        uint8_t trigger  = (acpi_flags >> 2) & 0x3; // 01 = edge, 11 = level
+        ioapic_attr      = 0;
+        /* Any non-"active high"/"edge" value (including conforms/reserved) keeps the SCI default. */
+        if (polarity != 0x1) ioapic_attr |= IOAPIC_POLARITY_ACTIVE_LOW;
+        if (trigger != 0x1) ioapic_attr |= IOAPIC_TRIGGER_LEVEL;
+    }
+
+    /* Map the SCI GSI to an APIC vector: GSI n -> vector (0x20 + n). */
+    sci_vector = IRQ_0 + (uint8_t)gsi;
 
     register_interrupt_handler(sci_vector, (void *)sci_handler, 0, 0x8e);
-    plogk("acpi-event: SCI handler registered on vector %u (IRQ %u)\n", sci_vector, irq);
+
+    /*
+     * Route the SCI through the I/O APIC. Once APIC mode is entered the 8259
+     * PIC is disabled, so unless this redirection entry is programmed the PM1
+     * fixed-event interrupt (power/sleep button) is never delivered and the
+     * handler registered above never runs.
+     */
+    if (!ioapic_available()) {
+        plogk("acpi-event: No I/O APIC; SCI will only be serviced by polling.\n");
+        return -ENODEV;
+    }
+
+    ioapic_routing_t routing = {
+        .vector = sci_vector,
+        .irq    = gsi,
+        .flags  = ioapic_attr,
+    };
+    ioapic_add(&routing);
+
+    plogk("acpi-event: SCI handler on vector %u (GSI %u), IOAPIC attrs 0x%04x\n", sci_vector, gsi, ioapic_attr);
     return 0;
 }
 
 /* Poll and dispatch pending ACPI events. */
 void acpi_event_poll(void)
 {
+    if (!pm1a_sts) return;
+
     uint16_t sts = acpi_pm1_status();
     uint16_t en  = acpi_pm1_enable();
     sts &= en;

@@ -1002,7 +1002,7 @@ int pci_request_irq(pci_device_cache_t *dev, pci_irq_request_t *request, pci_irq
         int vector = request->legacy_base + irq;
         register_interrupt_handler((uint16_t)vector, request->idt_handler, 0, 0x8e);
         if (request->legacy_ioapic) {
-            ioapic_routing_t routing = {(uint8_t)vector, irq};
+            ioapic_routing_t routing = {(uint8_t)vector, irq, 0};
             ioapic_add(&routing);
         }
         out->vector        = vector;
@@ -1031,7 +1031,7 @@ void pci_free_irq(pci_device_cache_t *dev, pci_irq_state_t *state)
         case PCI_IRQ_LEGACY :
             unregister_interrupt_handler((uint16_t)state->vector);
             if (state->legacy_ioapic) {
-                ioapic_routing_t routing = {(uint8_t)state->vector, state->irq};
+                ioapic_routing_t routing = {(uint8_t)state->vector, state->irq, 0};
                 ioapic_remove(&routing);
             }
             break;

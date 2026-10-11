@@ -34,6 +34,23 @@ int apic_lapic_timer_mode = -1;
 pointer_cast_t lapic_ptr;
 pointer_cast_t ioapic_ptr;
 
+/* Interrupt source overrides decoded from the MADT, queried later when routing
+ * the SCI so the firmware's polarity/trigger choice is honored. */
+static madt_io_apic_int_t madt_irq_overrides[MADT_MAX_IRQ_OVERRIDES];
+static int                madt_irq_override_count;
+
+/* Look up a MADT interrupt source override by ISA IRQ or GSI */
+int madt_irq_override(uint8_t irq, uint32_t *gsi, uint16_t *flags)
+{
+    for (int i = 0; i < madt_irq_override_count; i++) {
+        if (madt_irq_overrides[i].source != irq && madt_irq_overrides[i].global_system_interrupt != irq) continue;
+        if (gsi) *gsi = madt_irq_overrides[i].global_system_interrupt;
+        if (flags) *flags = madt_irq_overrides[i].flags;
+        return 1;
+    }
+    return 0;
+}
+
 /* Turn off PIC */
 void disable_pic(void)
 {
@@ -59,11 +76,17 @@ uint32_t ioapic_read(uint32_t reg)
     return mmio_read32(reg_ptr.ptr);
 }
 
+/* Whether an I/O APIC was discovered and initialized */
+int ioapic_available(void)
+{
+    return ioapic_ptr.ptr != 0;
+}
+
 /* Configuring I/O APIC interrupt routing */
 void ioapic_add(ioapic_routing_t *routing)
 {
     uint32_t ioredtbl = (uint32_t)(0x10 + (uint32_t)(routing->irq * 2));
-    uint64_t redirect = routing->vector;
+    uint64_t redirect = routing->vector | routing->flags;
     redirect |= lapic_id() << 56;
     ioapic_write(ioredtbl, (uint32_t)redirect);
     ioapic_write(ioredtbl + 1, (uint32_t)(redirect >> 32));
@@ -74,7 +97,7 @@ void ioapic_remove(ioapic_routing_t *routing)
 {
     uint32_t ioredtbl = (uint32_t)(0x10 + (uint32_t)(routing->irq * 2));
     uint64_t redirect = ioapic_read(ioredtbl) | ((uint64_t)ioapic_read(ioredtbl + 1) << 32);
-    redirect |= 0x10000ULL; // Interrupt Mask bit
+    redirect |= IOAPIC_MASKED; // Interrupt Mask bit
     ioapic_write(ioredtbl, (uint32_t)redirect);
     ioapic_write(ioredtbl + 1, (uint32_t)(redirect >> 32));
 }
@@ -242,13 +265,13 @@ void lapic_timer_try_upgrade(void)
 void io_apic_init(void)
 {
     ioapic_routing_t *ioapic_router[] = {
-        &(ioapic_routing_t) {IRQ_0,  0 }, // Timer IRQ_0 = 32
-        &(ioapic_routing_t) {IRQ_1,  1 }, // Keyboard IRQ_1 = 33
-        &(ioapic_routing_t) {IRQ_3,  3 }, // Serial COM2/COM4 IRQ_3 = 35
-        &(ioapic_routing_t) {IRQ_4,  4 }, // Serial COM1/COM3 IRQ_4 = 36
-        &(ioapic_routing_t) {IRQ_12, 12}, // Mouse IRQ_12 = 44
-        &(ioapic_routing_t) {IRQ_14, 14}, // IDE0 IRQ_14 = 46
-        &(ioapic_routing_t) {IRQ_15, 15}, // IDE1 IRQ_15 = 47
+        &(ioapic_routing_t) {IRQ_0,  0,  0}, // Timer IRQ_0 = 32
+        &(ioapic_routing_t) {IRQ_1,  1,  0}, // Keyboard IRQ_1 = 33
+        &(ioapic_routing_t) {IRQ_3,  3,  0}, // Serial COM2/COM4 IRQ_3 = 35
+        &(ioapic_routing_t) {IRQ_4,  4,  0}, // Serial COM1/COM3 IRQ_4 = 36
+        &(ioapic_routing_t) {IRQ_12, 12, 0}, // Mouse IRQ_12 = 44
+        &(ioapic_routing_t) {IRQ_14, 14, 0}, // IDE0 IRQ_14 = 46
+        &(ioapic_routing_t) {IRQ_15, 15, 0}, // IDE1 IRQ_15 = 47
         0,
     };
     ioapic_routing_t **routing = ioapic_router;
@@ -361,6 +384,7 @@ void apic_init(madt_t *madt)
                 madt_io_apic_int_t *int_override = (madt_io_apic_int_t *)(entries_base + current);
                 plogk("apic: IO/APIC interrupt source override: bus %u, source %u -> GSI %u, flags %x\n", int_override->bus, int_override->source, int_override->global_system_interrupt,
                       int_override->flags);
+                if (madt_irq_override_count < MADT_MAX_IRQ_OVERRIDES) madt_irq_overrides[madt_irq_override_count++] = *int_override;
                 break;
             }
             case MADT_APIC_IO_NMI : {
