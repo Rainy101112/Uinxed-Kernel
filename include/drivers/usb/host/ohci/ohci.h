@@ -39,6 +39,15 @@
 #define OHCI_HcRhStatus         0x50
 #define OHCI_HcRhPortStatus     0x54
 
+/* HcRhDescriptorA bits */
+#define OHCI_RH_A_PSM           (1U << 8)
+#define OHCI_RH_A_NPS           (1U << 9)
+#define OHCI_RH_A_POTPGT_SHIFT  24
+#define OHCI_RH_A_POTPGT_MASK   (0xffU << OHCI_RH_A_POTPGT_SHIFT)
+
+/* HcRhStatus bits */
+#define OHCI_RH_STATUS_LPSC     (1U << 16)
+
 /* HcControl bits */
 #define OHCI_CTRL_CBSR_SHIFT 0
 #define OHCI_CTRL_CBSR_MASK  (3U << 0)

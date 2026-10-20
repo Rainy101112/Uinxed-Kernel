@@ -782,11 +782,36 @@ static uint32_t xhci_port_neutral(uint32_t status)
     return status & XHCI_PORT_RWS_BITS;
 }
 
+/* Power every root port. An unpowered port reports CCS=0, so this must run
+ * before the first connect scan; real hardware does not preset PP like QEMU. */
+static void xhci_power_root_ports(xhci_controller_t *controller)
+{
+    bool changed = false;
+    for (uint8_t port = 1; port <= controller->max_ports; port++) {
+        size_t   offset = XHCI_OP_PORTS + ((size_t)(port - 1) * XHCI_PORT_STRIDE);
+        uint32_t status = xhci_read32(controller->operational, offset);
+        if (status & XHCI_PORT_PP) continue;
+        xhci_write32(controller->operational, offset, xhci_port_neutral(status) | XHCI_PORT_PP);
+        changed = true;
+    }
+    if (changed) {
+        plogk("usb-xhci: Root port power enabled\n");
+        msleep(100);
+    }
+}
+
 /* Perform the xHCI port reset sequence. */
 static int xhci_port_reset(xhci_controller_t *controller, uint8_t port_id)
 {
     size_t   offset = XHCI_OP_PORTS + ((size_t)(port_id - 1) * XHCI_PORT_STRIDE);
     uint32_t status = xhci_read32(controller->operational, offset);
+
+    /* A powered-off port reports CCS=0. Apply power before testing for a device. */
+    if (!(status & XHCI_PORT_PP)) {
+        xhci_write32(controller->operational, offset, xhci_port_neutral(status) | XHCI_PORT_PP);
+        msleep(100);
+        status = xhci_read32(controller->operational, offset);
+    }
     if (!(status & XHCI_PORT_CCS)) return -ENODEV;
     if (!(status & XHCI_PORT_PED)) {
         uint32_t value = xhci_port_neutral(status);
@@ -1607,6 +1632,10 @@ void xhci_start_workers(void)
         xhci_controller_t *controller = xhci_controllers[i];
         if (!controller || controller->worker_started) continue;
         controller->worker_started = true;
+
+        /* VBUS must be on before reading connect status; the initial scan runs
+         * before interrupts are enabled, so a later power-up could lose PCD. */
+        xhci_power_root_ports(controller);
 
         /* Enumerate already-connected root ports on the first worker pass. */
         for (uint8_t port = 1; port <= controller->max_ports; port++) {

@@ -476,6 +476,13 @@ static int ehci_port_reset(ehci_controller_t *ctrl, uint8_t port)
     if (port >= ctrl->num_ports) return -EINVAL;
     size_t   offset = EHCI_OP_PORTSC + (port * EHCI_PORT_STRIDE);
     uint32_t portsc = ehci_read32(ctrl->operational, offset);
+
+    /* An unpowered port reports CCS=0, so power it before testing connect. */
+    if (!(portsc & EHCI_PORT_PP)) {
+        ehci_write32(ctrl->operational, offset, (portsc & ~EHCI_PORT_CHANGE_BITS) | EHCI_PORT_PP);
+        msleep(100);
+        portsc = ehci_read32(ctrl->operational, offset);
+    }
     if (!(portsc & EHCI_PORT_CCS)) return -ENODEV;
     if ((portsc & EHCI_PORT_LS_MASK) == EHCI_PORT_LS_KSTATE) {
         ehci_write32(ctrl->operational, offset, portsc | EHCI_PORT_PO);
@@ -736,6 +743,25 @@ static usb_host_controller_ops_t ehci_controller_ops = {
     .host_stop = ehci_host_stop,
 };
 
+/* Apply VBUS to every root port when the controller implements per-port power
+ * switching. Real hardware leaves PP clear after reset; QEMU pre-sets it. */
+static void ehci_power_root_ports(ehci_controller_t *ctrl)
+{
+    if (!(ehci_read32(ctrl->capability, EHCI_CAP_HCSPARAMS) & EHCI_HCS_PPC)) return;
+    bool changed = false;
+    for (uint8_t port = 0; port < ctrl->num_ports; port++) {
+        size_t   offset = EHCI_OP_PORTSC + (port * EHCI_PORT_STRIDE);
+        uint32_t portsc = ehci_read32(ctrl->operational, offset);
+        if (portsc & EHCI_PORT_PP) continue;
+        ehci_write32(ctrl->operational, offset, (portsc & ~EHCI_PORT_CHANGE_BITS) | EHCI_PORT_PP);
+        changed = true;
+    }
+    if (changed) {
+        plogk("usb-ehci: Root port power enabled\n");
+        msleep(100);
+    }
+}
+
 /* Probe an EHCI PCI device: reset, allocate pools, and start. */
 static int ehci_probe(pci_device_cache_t *pci, uint8_t bus_number)
 {
@@ -860,6 +886,9 @@ void ehci_start_workers(void)
         ehci_controller_t *ctrl = ehci_controllers[i];
         if (!ctrl || ctrl->worker_started) continue;
         ctrl->worker_started = true;
+
+        /* Ports must be powered before the initial connect scan. */
+        ehci_power_root_ports(ctrl);
 
         /* Enumerate every root port on the first worker pass. */
         ctrl->pending_ports |= (1ULL << ctrl->num_ports) - 1;

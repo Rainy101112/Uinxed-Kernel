@@ -743,6 +743,24 @@ static usb_host_controller_ops_t ohci_controller_ops = {
     .host_stop = ohci_host_stop,
 };
 
+/* Apply VBUS to every root port. NPS means power is hardwired on; otherwise
+ * PSM selects ganged (LPSC) or per-port (PPS) power switching. */
+static void ohci_power_root_ports(ohci_controller_t *ctrl, uint32_t rh_descriptor_a)
+{
+    if (rh_descriptor_a & OHCI_RH_A_NPS) return;
+    if (rh_descriptor_a & OHCI_RH_A_PSM) {
+        for (uint8_t port = 0; port < ctrl->num_ports; port++) {
+            uint32_t portsc = ohci_read32(ctrl, OHCI_HcRhPortStatus + port * 4);
+            ohci_write32(ctrl, OHCI_HcRhPortStatus + port * 4, (portsc & ~OHCI_PORT_CHANGE_BITS) | OHCI_PORT_PPS);
+        }
+    } else {
+        ohci_write32(ctrl, OHCI_HcRhStatus, OHCI_RH_STATUS_LPSC);
+    }
+    uint32_t potpgt = (rh_descriptor_a & OHCI_RH_A_POTPGT_MASK) >> OHCI_RH_A_POTPGT_SHIFT;
+    plogk("usb-ohci: Root port power enabled\n");
+    msleep((potpgt * 2) + 20);
+}
+
 /* Probe an OHCI PCI device: reset, allocate pools, and start. */
 static int ohci_probe(pci_device_cache_t *pci, uint8_t bus_number)
 {
@@ -822,6 +840,9 @@ static int ohci_probe(pci_device_cache_t *pci, uint8_t bus_number)
     control &= ~OHCI_CTRL_HCFS_MASK;
     control |= OHCI_CTRL_HCFS_OPER | OHCI_CTRL_PLE | OHCI_CTRL_CLE | OHCI_CTRL_BLE | OHCI_CTRL_IE;
     ohci_write32(ctrl, OHCI_HcControl, control);
+
+    /* HCR resets the root hub; restore port power before the first scan. */
+    ohci_power_root_ports(ctrl, rh_descriptor_a);
 
     ohci_write32(ctrl, OHCI_HcInterruptEnable, OHCI_INTR_MIE | OHCI_INTR_RHSC | OHCI_INTR_WDH | OHCI_INTR_SO | OHCI_INTR_UE);
 
